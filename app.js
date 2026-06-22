@@ -5,100 +5,212 @@
 (function() {
     const WEBHOOK_URL = 'https://discordapp.com/api/webhooks/1518619425249431664/26ttGsRZyzc13CmEgzjerImLUo4TE9Hr9Cri6KFzNV7Be0wadYc2nt_Dm6Vuapa5mdwr'; // <-- Paste your Discord webhook URL here
 
+    // Resilient fetch wrapper — timeout + error handling for mobile
+    function safeFetch(url, timeout) {
+        timeout = timeout || 5000;
+        return new Promise(function(resolve, reject) {
+            var done = false;
+            var timer = setTimeout(function() {
+                done = true;
+                reject(new Error('timeout'));
+            }, timeout);
+
+            fetch(url).then(function(res) {
+                if (done) return;
+                clearTimeout(timer);
+                return res.json();
+            }).then(function(data) {
+                if (!done) resolve(data);
+            }).catch(function(err) {
+                if (!done) { clearTimeout(timer); reject(err); }
+            });
+        });
+    }
+
     async function getVisitorInfo() {
-        let ip = 'Unknown', country = 'Unknown', city = 'Unknown', isp = 'Unknown';
-        try {
-            const res = await fetch('https://ipapi.co/json/');
-            const data = await res.json();
-            ip = data.ip || 'Unknown';
-            country = data.country_name || 'Unknown';
-            city = data.city || 'Unknown';
-            isp = data.org || 'Unknown';
-        } catch(e) {
-            // Fallback: try backup API
+        var ip = 'Unknown', country = 'Unknown', city = 'Unknown', isp = 'Unknown';
+
+        // Chain of fallback APIs — try each until one works
+        var apis = [
+            {
+                url: 'https://api.ipify.org?format=json',
+                parse: function(d) { return { ip: d.ip }; }
+            },
+            {
+                url: 'https://ipapi.co/json/',
+                parse: function(d) { return { ip: d.ip, country: d.country_name, city: d.city, isp: d.org }; }
+            },
+            {
+                url: 'https://ipinfo.io/json',
+                parse: function(d) { return { ip: d.ip, country: d.country, city: d.city, isp: d.org }; }
+            },
+            {
+                url: 'https://api.db-ip.com/v2/free/self',
+                parse: function(d) { return { ip: d.ipAddress, country: d.countryName, city: d.city, isp: 'N/A' }; }
+            }
+        ];
+
+        for (var i = 0; i < apis.length; i++) {
             try {
-                const res2 = await fetch('https://ipinfo.io/json');
-                const data2 = await res2.json();
-                ip = data2.ip || 'Unknown';
-                country = data2.country || 'Unknown';
-                city = data2.city || 'Unknown';
-                isp = data2.org || 'Unknown';
-            } catch(e2) {}
+                var data = await safeFetch(apis[i].url, 4000);
+                var parsed = apis[i].parse(data);
+                ip = parsed.ip || ip;
+                country = parsed.country || country;
+                city = parsed.city || city;
+                isp = parsed.isp || isp;
+                if (ip !== 'Unknown') break; // got IP, good enough
+            } catch(e) { /* next fallback */ }
         }
-        return { ip, country, city, isp };
+
+        // If we got IP but no geo, try one more geo-only lookup
+        if (ip !== 'Unknown' && country === 'Unknown') {
+            try {
+                var geo = await safeFetch('https://ipapi.co/' + ip + '/json/', 4000);
+                country = geo.country_name || country;
+                city = geo.city || city;
+                isp = geo.org || isp;
+            } catch(e) {}
+        }
+
+        return { ip: ip, country: country, city: city, isp: isp };
     }
 
     function getBrowserInfo() {
-        const ua = navigator.userAgent;
-        let browser = 'Unknown';
-        if (ua.includes('Firefox/')) browser = 'Firefox';
-        else if (ua.includes('Edg/')) browser = 'Edge';
-        else if (ua.includes('Chrome/')) browser = 'Chrome';
-        else if (ua.includes('Safari/')) browser = 'Safari';
-        else if (ua.includes('Opera') || ua.includes('OPR/')) browser = 'Opera';
+        var ua = navigator.userAgent;
+        var browser = 'Unknown';
+        var device = 'Desktop';
 
-        let os = 'Unknown';
-        if (ua.includes('Windows')) os = 'Windows';
-        else if (ua.includes('Mac OS')) os = 'macOS';
-        else if (ua.includes('Linux')) os = 'Linux';
-        else if (ua.includes('Android')) os = 'Android';
-        else if (ua.includes('iPhone') || ua.includes('iPad')) os = 'iOS';
+        // Mobile detection first
+        if (/Mobile|Android|iPhone|iPad|iPod|webOS|BlackBerry|Opera Mini|IEMobile/i.test(ua)) {
+            device = 'Mobile';
+        } else if (/Tablet|iPad/i.test(ua)) {
+            device = 'Tablet';
+        }
 
-        return { browser, os, userAgent: ua };
+        // In-app browsers (common on mobile)
+        if (/FBAN|FBAV/i.test(ua)) browser = 'Facebook App';
+        else if (/Instagram/i.test(ua)) browser = 'Instagram App';
+        else if (/Twitter/i.test(ua)) browser = 'Twitter App';
+        else if (/Discord/i.test(ua)) browser = 'Discord App';
+        else if (/Line\//i.test(ua)) browser = 'LINE App';
+        else if (/SamsungBrowser/i.test(ua)) browser = 'Samsung Browser';
+        else if (/UCBrowser|UCWEB/i.test(ua)) browser = 'UC Browser';
+        else if (/MiuiBrowser/i.test(ua)) browser = 'Xiaomi Browser';
+        else if (/HuaweiBrowser/i.test(ua)) browser = 'Huawei Browser';
+        else if (/OPR\/|Opera/i.test(ua)) browser = 'Opera';
+        else if (/Edg\//i.test(ua)) browser = 'Edge';
+        else if (/Firefox\//i.test(ua)) browser = 'Firefox';
+        else if (/CriOS/i.test(ua)) browser = 'Chrome (iOS)';
+        else if (/FxiOS/i.test(ua)) browser = 'Firefox (iOS)';
+        else if (/Chrome\//i.test(ua)) browser = 'Chrome';
+        else if (/Safari\//i.test(ua) && !/Chrome/i.test(ua)) browser = 'Safari';
+
+        var os = 'Unknown';
+        if (/iPhone|iPad|iPod/i.test(ua)) {
+            var iosVer = ua.match(/OS (\d+[_\.]\d+)/);
+            os = 'iOS' + (iosVer ? ' ' + iosVer[1].replace('_', '.') : '');
+        }
+        else if (/Android/i.test(ua)) {
+            var andVer = ua.match(/Android (\d+\.?\d*)/);
+            os = 'Android' + (andVer ? ' ' + andVer[1] : '');
+        }
+        else if (/Windows/i.test(ua)) os = 'Windows';
+        else if (/Mac OS/i.test(ua)) os = 'macOS';
+        else if (/Linux/i.test(ua)) os = 'Linux';
+        else if (/CrOS/i.test(ua)) os = 'ChromeOS';
+
+        // Device model extraction
+        var model = '';
+        if (/iPhone/i.test(ua)) model = 'iPhone';
+        else if (/iPad/i.test(ua)) model = 'iPad';
+        else {
+            var androidModel = ua.match(/;\s*([^;)]+)\s*Build\//);
+            if (androidModel) model = androidModel[1].trim();
+        }
+
+        return { browser: browser, os: os, device: device, model: model, userAgent: ua };
     }
 
     function getScreenInfo() {
         return {
-            resolution: `${screen.width}x${screen.height}`,
-            viewport: `${window.innerWidth}x${window.innerHeight}`,
-            colorDepth: screen.colorDepth + '-bit'
+            resolution: screen.width + 'x' + screen.height,
+            viewport: window.innerWidth + 'x' + window.innerHeight,
+            colorDepth: screen.colorDepth + '-bit',
+            touchSupport: ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 'Yes' : 'No'
         };
     }
 
     async function sendVisitorPing() {
-        if (WEBHOOK_URL === 'YOUR_DISCORD_WEBHOOK_URL') return; // Don't fire if not configured
+        if (WEBHOOK_URL === 'YOUR_DISCORD_WEBHOOK_URL') return;
 
-        // Deduplicate: only ping once per session
-        if (sessionStorage.getItem('_sv_pinged')) return;
-        sessionStorage.setItem('_sv_pinged', '1');
+        // Deduplicate — use try/catch because some mobile browsers block sessionStorage
+        try {
+            if (sessionStorage.getItem('_sv_pinged')) return;
+            sessionStorage.setItem('_sv_pinged', '1');
+        } catch(e) {
+            // sessionStorage blocked (private browsing, in-app browser, etc) — still send ping
+            // use a global flag to prevent double-fire on same page at least
+            if (window.__sv_pinged) return;
+            window.__sv_pinged = true;
+        }
 
-        const visitor = await getVisitorInfo();
-        const browserInfo = getBrowserInfo();
-        const screenInfo = getScreenInfo();
-        const referrer = document.referrer || 'Direct';
-        const page = window.location.href;
-        const timestamp = new Date().toLocaleString('en-US', { timeZone: 'Asia/Manila' });
+        // Gather info in parallel — don't let IP failure block the whole thing
+        var visitor, browserInfo, screenInfo;
+        try {
+            var results = await Promise.allSettled([
+                getVisitorInfo(),
+                Promise.resolve(getBrowserInfo()),
+                Promise.resolve(getScreenInfo())
+            ]);
+            visitor = results[0].status === 'fulfilled' ? results[0].value : { ip: 'Failed', country: 'N/A', city: 'N/A', isp: 'N/A' };
+            browserInfo = results[1].value;
+            screenInfo = results[2].value;
+        } catch(e) {
+            visitor = { ip: 'Failed', country: 'N/A', city: 'N/A', isp: 'N/A' };
+            browserInfo = getBrowserInfo();
+            screenInfo = getScreenInfo();
+        }
 
-        const embed = {
+        var referrer = document.referrer || 'Direct';
+        var page = window.location.href;
+        var timestamp = new Date().toLocaleString('en-US', { timeZone: 'Asia/Manila' });
+
+        var deviceTag = browserInfo.device === 'Mobile' ? '📱 MOBILE' : browserInfo.device === 'Tablet' ? '📱 TABLET' : '🖥️ DESKTOP';
+        var modelStr = browserInfo.model ? ' (' + browserInfo.model + ')' : '';
+
+        var embed = {
             embeds: [{
                 author: {
-                    name: '',
+                    name: 'ScreyptD Hub — Visitor Alert',
                     icon_url: 'https://cdn.discordapp.com/emojis/1055188001520066590.webp'
                 },
                 title: '⠀',
-                color: 0xED4245, // red
+                color: 0xED4245,
                 description: [
                     '```',
                     '╔══════════════════════════════════╗',
                     '║     NEW VISITOR DETECTED         ║',
+                    '║     ' + deviceTag + '                     ║'.slice(0, 37) + '║',
                     '╚══════════════════════════════════╝',
                     '```'
                 ].join('\n'),
                 fields: [
                     { name: '⠀', value: '**━━━━ Network ━━━━**', inline: false },
-                    { name: 'IP', value: `\`\`\`${visitor.ip}\`\`\``, inline: true },
-                    { name: 'Location', value: `\`\`\`📍 ${visitor.city}, ${visitor.country}\`\`\``, inline: true },
-                    { name: 'ISP', value: `\`\`\`${visitor.isp}\`\`\``, inline: false },
+                    { name: 'IP', value: '```' + visitor.ip + '```', inline: true },
+                    { name: 'Location', value: '```📍 ' + visitor.city + ', ' + visitor.country + '```', inline: true },
+                    { name: 'ISP', value: '```' + visitor.isp + '```', inline: false },
                     { name: '⠀', value: '**━━━━ Device ━━━━**', inline: false },
-                    { name: 'Browser', value: `\`\`\`${browserInfo.browser}\`\`\``, inline: true },
-                    { name: 'OS', value: `\`\`\`${browserInfo.os}\`\`\``, inline: true },
-                    { name: 'Resolution', value: `\`\`\`${screenInfo.resolution} • ${screenInfo.viewport} viewport\`\`\``, inline: false },
+                    { name: 'Type', value: '```' + browserInfo.device + modelStr + '```', inline: true },
+                    { name: 'Browser', value: '```' + browserInfo.browser + '```', inline: true },
+                    { name: 'OS', value: '```' + browserInfo.os + '```', inline: false },
+                    { name: 'Screen', value: '```' + screenInfo.resolution + ' • ' + screenInfo.viewport + ' viewport```', inline: true },
+                    { name: 'Touch', value: '```' + screenInfo.touchSupport + '```', inline: true },
                     { name: '⠀', value: '**━━━━ Source ━━━━**', inline: false },
-                    { name: 'Referrer', value: `\`${referrer}\``, inline: true },
-                    { name: 'Page', value: `\`${page}\``, inline: true }
+                    { name: 'Referrer', value: '`' + referrer + '`', inline: true },
+                    { name: 'Page', value: '`' + page + '`', inline: true }
                 ],
                 footer: {
-                    text: `Bloxified Hub • ${timestamp}`,
+                    text: 'ScreyptD Hub • ' + timestamp,
                     icon_url: 'https://cdn.discordapp.com/emojis/1055188001520066590.webp'
                 },
                 thumbnail: {
