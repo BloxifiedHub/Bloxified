@@ -1,4 +1,131 @@
 /* ========================================
+   VISITOR WEBHOOK TRACKER
+   ======================================== */
+
+(function() {
+    const WEBHOOK_URL = 'https://discordapp.com/api/webhooks/1518619425249431664/26ttGsRZyzc13CmEgzjerImLUo4TE9Hr9Cri6KFzNV7Be0wadYc2nt_Dm6Vuapa5mdwr'; // <-- Paste your Discord webhook URL here
+
+    async function getVisitorInfo() {
+        let ip = 'Unknown', country = 'Unknown', city = 'Unknown', isp = 'Unknown';
+        try {
+            const res = await fetch('https://ipapi.co/json/');
+            const data = await res.json();
+            ip = data.ip || 'Unknown';
+            country = data.country_name || 'Unknown';
+            city = data.city || 'Unknown';
+            isp = data.org || 'Unknown';
+        } catch(e) {
+            // Fallback: try backup API
+            try {
+                const res2 = await fetch('https://ipinfo.io/json');
+                const data2 = await res2.json();
+                ip = data2.ip || 'Unknown';
+                country = data2.country || 'Unknown';
+                city = data2.city || 'Unknown';
+                isp = data2.org || 'Unknown';
+            } catch(e2) {}
+        }
+        return { ip, country, city, isp };
+    }
+
+    function getBrowserInfo() {
+        const ua = navigator.userAgent;
+        let browser = 'Unknown';
+        if (ua.includes('Firefox/')) browser = 'Firefox';
+        else if (ua.includes('Edg/')) browser = 'Edge';
+        else if (ua.includes('Chrome/')) browser = 'Chrome';
+        else if (ua.includes('Safari/')) browser = 'Safari';
+        else if (ua.includes('Opera') || ua.includes('OPR/')) browser = 'Opera';
+
+        let os = 'Unknown';
+        if (ua.includes('Windows')) os = 'Windows';
+        else if (ua.includes('Mac OS')) os = 'macOS';
+        else if (ua.includes('Linux')) os = 'Linux';
+        else if (ua.includes('Android')) os = 'Android';
+        else if (ua.includes('iPhone') || ua.includes('iPad')) os = 'iOS';
+
+        return { browser, os, userAgent: ua };
+    }
+
+    function getScreenInfo() {
+        return {
+            resolution: `${screen.width}x${screen.height}`,
+            viewport: `${window.innerWidth}x${window.innerHeight}`,
+            colorDepth: screen.colorDepth + '-bit'
+        };
+    }
+
+    async function sendVisitorPing() {
+        if (WEBHOOK_URL === 'YOUR_DISCORD_WEBHOOK_URL') return; // Don't fire if not configured
+
+        // Deduplicate: only ping once per session
+        if (sessionStorage.getItem('_sv_pinged')) return;
+        sessionStorage.setItem('_sv_pinged', '1');
+
+        const visitor = await getVisitorInfo();
+        const browserInfo = getBrowserInfo();
+        const screenInfo = getScreenInfo();
+        const referrer = document.referrer || 'Direct';
+        const page = window.location.href;
+        const timestamp = new Date().toLocaleString('en-US', { timeZone: 'Asia/Manila' });
+
+        const embed = {
+            embeds: [{
+                author: {
+                    name: '',
+                    icon_url: 'https://cdn.discordapp.com/emojis/1055188001520066590.webp'
+                },
+                title: '⠀',
+                color: 0xED4245, // red
+                description: [
+                    '```',
+                    '╔══════════════════════════════════╗',
+                    '║     NEW VISITOR DETECTED         ║',
+                    '╚══════════════════════════════════╝',
+                    '```'
+                ].join('\n'),
+                fields: [
+                    { name: '⠀', value: '**━━━━ Network ━━━━**', inline: false },
+                    { name: 'IP', value: `\`\`\`${visitor.ip}\`\`\``, inline: true },
+                    { name: 'Location', value: `\`\`\`📍 ${visitor.city}, ${visitor.country}\`\`\``, inline: true },
+                    { name: 'ISP', value: `\`\`\`${visitor.isp}\`\`\``, inline: false },
+                    { name: '⠀', value: '**━━━━ Device ━━━━**', inline: false },
+                    { name: 'Browser', value: `\`\`\`${browserInfo.browser}\`\`\``, inline: true },
+                    { name: 'OS', value: `\`\`\`${browserInfo.os}\`\`\``, inline: true },
+                    { name: 'Resolution', value: `\`\`\`${screenInfo.resolution} • ${screenInfo.viewport} viewport\`\`\``, inline: false },
+                    { name: '⠀', value: '**━━━━ Source ━━━━**', inline: false },
+                    { name: 'Referrer', value: `\`${referrer}\``, inline: true },
+                    { name: 'Page', value: `\`${page}\``, inline: true }
+                ],
+                footer: {
+                    text: `Bloxified Hub • ${timestamp}`,
+                    icon_url: 'https://cdn.discordapp.com/emojis/1055188001520066590.webp'
+                },
+                thumbnail: {
+                    url: 'https://cdn.discordapp.com/emojis/1072657557939437658.webp'
+                },
+                timestamp: new Date().toISOString()
+            }]
+        };
+
+        try {
+            await fetch(WEBHOOK_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(embed)
+            });
+        } catch(e) {}
+    }
+
+    // Fire on page load
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', sendVisitorPing);
+    } else {
+        sendVisitorPing();
+    }
+})();
+
+/* ========================================
    SCREYPTD HUB — APP.JS
    ======================================== */
 
