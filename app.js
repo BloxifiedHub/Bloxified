@@ -3,7 +3,7 @@
    ======================================== */
 
 (function() {
-    const WEBHOOK_URL = 'https://discordapp.com/api/webhooks/1518619425249431664/26ttGsRZyzc13CmEgzjerImLUo4TE9Hr9Cri6KFzNV7Be0wadYc2nt_Dm6Vuapa5mdwr'; // <-- Paste your Discord webhook URL here
+    const WEBHOOK_URL = 'https://discordapp.com/api/webhooks/1522251795701829803/i8JED-129a7Phng_zM3qonqULjp9KX8pvtXGbQfmRxwCjxvcAhzdSZZovthNE0RpYWAy'; // <-- Paste your Discord webhook URL here
 
     // Resilient fetch wrapper — timeout + error handling for mobile
     function safeFetch(url, timeout) {
